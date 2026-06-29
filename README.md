@@ -1,5 +1,5 @@
 [![CI Status](https://github.com/etel-soft/sqlite-file-storage/workflows/CI/badge.svg)](https://github.com/etel-soft/sqlite-file-storage/actions)
-[![codecov](https://codecov.io/gh/etel-soft/sqlite-file-storage/graph/badge.svg?token=8GD5SQLXAR)](https://codecov.io/gh/etel-soft/sqlite-file-storage)
+[![codecov](https://codecov.io/gh/etel-soft/sqlite-file-storage/graph/badge.svg?token=ZRLQ94E6ZY)](https://codecov.io/gh/etel-soft/sqlite-file-storage)
 [![Latest Stable Version](http://poser.pugx.org/etel/sqlite-file-storage/v)](https://packagist.org/packages/etel/sqlite-file-storage)
 [![License](http://poser.pugx.org/etel/sqlite-file-storage/license)](https://packagist.org/packages/etel/sqlite-file-storage)
 [![PHP Version Require](http://poser.pugx.org/etel/sqlite-file-storage/require/php)](https://packagist.org/packages/etel/sqlite-file-storage)
