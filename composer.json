@@ -1,0 +1,47 @@
+{
+    "name": "etel/sqlite-file-storage",
+    "type": "library",
+    "homepage": "https://github.com/etel-soft/sqlite-file-storage",
+    "description": "File storage backed by a single SQLite database with streaming, compression and encryption support.",
+    "keywords": ["sqlite", "file storage", "object storage", "streaming", "compression", "encryption"],
+    "license": "MIT",
+    "minimum-stability": "stable",
+    "prefer-stable": true,
+    "authors": [
+        {
+            "name": "Mykola Zyk",
+            "email": "mykola@etel.dev"
+        }
+    ],
+    "require": {
+        "php": ">=8.4",
+        "ext-json": "*",
+        "ext-sqlite3": "*",
+        "ext-zlib": "*"
+    },
+    "require-dev": {
+        "ext-sodium": "*",
+        "etel/phpunit-double": "^0.1.0",
+        "friendsofphp/php-cs-fixer": "^3.94",
+        "phpstan/phpstan": "^2.1",
+        "phpunit/phpunit": "^13.0"
+    },
+    "suggest": {
+        "ext-brotli": "Enables Brotli compression",
+        "ext-fileinfo": "Enables automatic MIME type detection",
+        "ext-sodium": "Required for XChaCha20-Poly1305 encryption"
+    },
+    "autoload": {
+        "psr-4": {
+            "Etel\\SqliteFileStorage\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Etel\\SqliteFileStorage\\Tests\\": "tests/"
+        }
+    },
+    "config": {
+        "sort-packages": true
+    }
+}

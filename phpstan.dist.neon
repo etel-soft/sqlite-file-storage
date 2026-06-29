@@ -1,0 +1,9 @@
+parameters:
+    level: 10
+    paths:
+        - src/
+        - tests/
+    ignoreErrors:
+        -
+            message: '#brotli_#'
+            reportUnmatched: false
