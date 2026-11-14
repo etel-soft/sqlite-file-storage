@@ -230,20 +230,24 @@ final class SqliteStorage implements Storage
     {
         $this->assertWritable(operation: 'initialize');
 
-        if (!$this->schemaExists()) {
-            $this->createSchema();
+        // The check and the creation run under one write lock: connections opening a new database at once
+        // would otherwise all see no schema and all try to create it.
+        $this->transactional(operation: function (): void {
+            if (!$this->schemaExists()) {
+                $this->createSchema();
 
-            return;
-        }
+                return;
+            }
 
-        $storedVersion = $this->querySingle(sql: "SELECT value FROM storage_info WHERE key = 'schema_version'");
-        $version = is_string(value: $storedVersion) || is_int(value: $storedVersion) ? (int) $storedVersion : 0;
+            $storedVersion = $this->querySingle(sql: "SELECT value FROM storage_info WHERE key = 'schema_version'");
+            $version = is_string(value: $storedVersion) || is_int(value: $storedVersion) ? (int) $storedVersion : 0;
 
-        if ($version > self::SCHEMA_VERSION) {
-            throw StorageIoException::schemaTooNew(version: $version);
-        }
+            if ($version > self::SCHEMA_VERSION) {
+                throw StorageIoException::schemaTooNew(version: $version);
+            }
 
-        // Sequential migration steps for future schema versions go here.
+            // Sequential migration steps for future schema versions go here.
+        });
     }
 
     #[Override]
