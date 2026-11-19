@@ -34,6 +34,19 @@ foreach ($storage->listObjects(prefix: 'invoices/2026/') as $item) {
 }
 ```
 
+## Durability
+
+The storage runs SQLite in WAL mode. By default (`Durability::Buffered`, `synchronous = NORMAL`) the log is
+synced only at checkpoints: the storage stays consistent and a process crash loses nothing, but a power cut or
+an OS crash may roll back the last writes, ones that already returned. Where a write that returned must be on
+the disk, ask for `Durability::Synced` (`synchronous = FULL`): every commit syncs the log. That is a sync per
+write — on an SSD a few milliseconds, which bounds how many writes a second one storage takes (its writes go one
+at a time): for small objects several times fewer than buffered.
+
+```php
+$storage = new StorageFactory()->open($path, new StorageOptions(durability: Durability::Synced));
+```
+
 ## Requirements
 
 PHP >= 8.4 with `ext-sqlite3`, `ext-zlib`.
