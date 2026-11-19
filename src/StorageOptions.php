@@ -15,6 +15,7 @@ final readonly class StorageOptions
         public ?KeyProvider $keyProvider = null,
         public bool $createIfNotExists = true,
         public int $busyTimeoutMs = 5000,
-        public bool $readOnly = false
+        public bool $readOnly = false,
+        public Durability $durability = Durability::Buffered
     ) {}
 }

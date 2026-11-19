@@ -40,10 +40,21 @@ final class StorageFactory
         $db->busyTimeout(milliseconds: $options->busyTimeoutMs);
 
         if (!$options->readOnly) {
-            // auto_vacuum must be configured before the first table is created.
-            $db->exec(query: 'PRAGMA auto_vacuum = INCREMENTAL');
-            $db->exec(query: 'PRAGMA journal_mode = WAL');
-            $db->exec(query: 'PRAGMA synchronous = NORMAL');
+            // SQLite opens any file lazily: one that is no database fails here, on the first statement
+            try {
+                // auto_vacuum must be configured before the first table is created.
+                $db->exec(query: 'PRAGMA auto_vacuum = INCREMENTAL');
+                $db->exec(query: 'PRAGMA journal_mode = WAL');
+                // whether a commit waits for the disk: applies to this connection only
+                $db->exec(query: match ($options->durability) {
+                    Durability::Buffered => 'PRAGMA synchronous = NORMAL',
+                    Durability::Synced => 'PRAGMA synchronous = FULL',
+                });
+            } catch (Exception $exception) {
+                $db->close();
+
+                throw StorageIoException::cannotOpenDatabase(path: $path, previous: $exception);
+            }
         }
 
         $storage = new SqliteStorage(db: $db, options: $options);

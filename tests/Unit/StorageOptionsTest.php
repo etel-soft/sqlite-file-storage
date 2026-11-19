@@ -6,6 +6,7 @@ namespace Etel\SqliteFileStorage\Tests\Unit;
 
 use Etel\SqliteFileStorage\ArrayKeyProvider;
 use Etel\SqliteFileStorage\Compression;
+use Etel\SqliteFileStorage\Durability;
 use Etel\SqliteFileStorage\Encryption;
 use Etel\SqliteFileStorage\StorageOptions;
 use Etel\SqliteFileStorage\Tests\UnitTestCase;
@@ -33,6 +34,7 @@ final class StorageOptionsTest extends UnitTestCase
         $this->assertTrue($options->createIfNotExists);
         $this->assertSame(5000, $options->busyTimeoutMs);
         $this->assertFalse($options->readOnly);
+        $this->assertSame(Durability::Buffered, $options->durability);
     }
 
     #[Test]
@@ -47,7 +49,8 @@ final class StorageOptionsTest extends UnitTestCase
             keyProvider: $keyProvider,
             createIfNotExists: false,
             busyTimeoutMs: 1000,
-            readOnly: true
+            readOnly: true,
+            durability: Durability::Synced
         );
 
         $this->assertSame(Compression::Brotli, $options->defaultCompression);
@@ -56,5 +59,6 @@ final class StorageOptionsTest extends UnitTestCase
         $this->assertFalse($options->createIfNotExists);
         $this->assertSame(1000, $options->busyTimeoutMs);
         $this->assertTrue($options->readOnly);
+        $this->assertSame(Durability::Synced, $options->durability);
     }
 }
