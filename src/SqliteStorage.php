@@ -230,8 +230,14 @@ final class SqliteStorage implements Storage
     {
         $this->assertWritable(operation: 'initialize');
 
-        // The check and the creation run under one write lock: connections opening a new database at once
-        // would otherwise all see no schema and all try to create it.
+        // The usual case, a schema already in place, is read without the write lock: a connection opened for one
+        // write would otherwise queue behind the writers of the database only to look at its schema.
+        if ($this->schemaIsCurrent()) {
+            return;
+        }
+
+        // A schema to create (or to migrate): the check is repeated under one write lock, as connections opening a
+        // new database at once would otherwise all see no schema and all try to create it.
         $this->transactional(operation: function (): void {
             if (!$this->schemaExists()) {
                 $this->createSchema();
@@ -239,11 +245,8 @@ final class SqliteStorage implements Storage
                 return;
             }
 
-            $storedVersion = $this->querySingle(sql: "SELECT value FROM storage_info WHERE key = 'schema_version'");
-            $version = is_string(value: $storedVersion) || is_int(value: $storedVersion) ? (int) $storedVersion : 0;
-
-            if ($version > self::SCHEMA_VERSION) {
-                throw StorageIoException::schemaTooNew(version: $version);
+            if ($this->schemaIsCurrent()) {
+                return; // another connection created it meanwhile
             }
 
             // Sequential migration steps for future schema versions go here.
@@ -910,6 +913,28 @@ final class SqliteStorage implements Storage
             throw StorageIoException::fromSqlite(previous: $exception);
         }
         // @codeCoverageIgnoreEnd
+    }
+
+    /**
+     * Whether the schema is there at the version this library writes; a newer one is refused, as this library would
+     * misread it.
+     *
+     * @throws StorageIoException When the schema is newer than this library
+     */
+    private function schemaIsCurrent(): bool
+    {
+        if (!$this->schemaExists()) {
+            return false;
+        }
+
+        $storedVersion = $this->querySingle(sql: "SELECT value FROM storage_info WHERE key = 'schema_version'");
+        $version = is_string(value: $storedVersion) || is_int(value: $storedVersion) ? (int) $storedVersion : 0;
+
+        if ($version > self::SCHEMA_VERSION) {
+            throw StorageIoException::schemaTooNew(version: $version);
+        }
+
+        return $version === self::SCHEMA_VERSION;
     }
 
     private function schemaExists(): bool
