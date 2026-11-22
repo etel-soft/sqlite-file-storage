@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace Etel\SqliteFileStorage\Tests\Integration;
 
+use Etel\SqliteFileStorage\StorageOptions;
 use Etel\SqliteFileStorage\Tests\IntegrationTestCase;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\Attributes\TestDox;
+use SQLite3;
 
 use function dirname;
 use function fclose;
@@ -60,6 +62,26 @@ final class ConcurrentInitializationTest extends IntegrationTestCase
         }
 
         $this->assertSame(self::PROCESSES, $this->openStorage(name: 'shared.db')->getStats()->objectCount);
+    }
+
+    #[Test]
+    #[TestDox('Opening a database whose schema is in place does not wait for its writer')]
+    public function testOpenOfAnInitializedDatabaseTakesNoWriteLock(): void
+    {
+        $this->openStorage(name: 'busy.db')->close();
+        $writer = new SQLite3(filename: $this->databasePath(name: 'busy.db'));
+        $writer->exec(query: 'BEGIN IMMEDIATE');
+
+        try {
+            // with the write lock held elsewhere, a check under BEGIN IMMEDIATE would give up after the busy timeout
+            $storage = $this->openStorage(options: new StorageOptions(busyTimeoutMs: 1), name: 'busy.db');
+
+            $this->assertSame(0, $storage->getStats()->objectCount);
+            $storage->close();
+        } finally {
+            $writer->exec(query: 'ROLLBACK');
+            $writer->close();
+        }
     }
 
     /* @noinspection PhpUnnecessaryCurlyVarSyntaxInspection */

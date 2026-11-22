@@ -13,12 +13,16 @@ use const SQLITE3_OPEN_READONLY;
 use const SQLITE3_OPEN_READWRITE;
 
 use function file_exists;
+use function max;
 
 /**
  * Opens (and, unless disabled, creates) SQLite storage nodes.
  */
 final class StorageFactory
 {
+    /** PRAGMA auto_vacuum's answer for INCREMENTAL */
+    private const int AUTO_VACUUM_INCREMENTAL = 2;
+
     public function open(string $path, StorageOptions $options = new StorageOptions()): Storage
     {
         $exists = file_exists(filename: $path);
@@ -42,9 +46,16 @@ final class StorageFactory
         if (!$options->readOnly) {
             // SQLite opens any file lazily: one that is no database fails here, on the first statement
             try {
-                // auto_vacuum must be configured before the first table is created.
-                $db->exec(query: 'PRAGMA auto_vacuum = INCREMENTAL');
+                // auto_vacuum must be configured before the first table is created. Setting it takes the write
+                // lock even where it changes nothing (a database with tables keeps its mode), so it is set only while
+                // the database does not have it yet: opening one already set up waits for no writer
+                if ($db->querySingle(query: 'PRAGMA auto_vacuum') !== self::AUTO_VACUUM_INCREMENTAL) {
+                    $db->exec(query: 'PRAGMA auto_vacuum = INCREMENTAL');
+                }
                 $db->exec(query: 'PRAGMA journal_mode = WAL');
+                // the log is cut back to this when this connection starts it over: one large write leaves no
+                // log of its size behind (a connection's own setting, as synchronous)
+                $db->exec(query: 'PRAGMA journal_size_limit = ' . max(-1, $options->journalSizeLimitBytes));
                 // whether a commit waits for the disk: applies to this connection only
                 $db->exec(query: match ($options->durability) {
                     Durability::Buffered => 'PRAGMA synchronous = NORMAL',
