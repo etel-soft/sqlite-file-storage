@@ -13,6 +13,7 @@ use const SQLITE3_OPEN_READONLY;
 use const SQLITE3_OPEN_READWRITE;
 
 use function file_exists;
+use function max;
 
 /**
  * Opens (and, unless disabled, creates) SQLite storage nodes.
@@ -52,6 +53,9 @@ final class StorageFactory
                     $db->exec(query: 'PRAGMA auto_vacuum = INCREMENTAL');
                 }
                 $db->exec(query: 'PRAGMA journal_mode = WAL');
+                // the log is cut back to this when this connection starts it over: one large write leaves no
+                // log of its size behind (a connection's own setting, as synchronous)
+                $db->exec(query: 'PRAGMA journal_size_limit = ' . max(-1, $options->journalSizeLimitBytes));
                 // whether a commit waits for the disk: applies to this connection only
                 $db->exec(query: match ($options->durability) {
                     Durability::Buffered => 'PRAGMA synchronous = NORMAL',

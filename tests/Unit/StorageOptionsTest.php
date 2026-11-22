@@ -35,6 +35,7 @@ final class StorageOptionsTest extends UnitTestCase
         $this->assertSame(5000, $options->busyTimeoutMs);
         $this->assertFalse($options->readOnly);
         $this->assertSame(Durability::Buffered, $options->durability);
+        $this->assertSame(67_108_864, $options->journalSizeLimitBytes);
     }
 
     #[Test]
@@ -50,7 +51,8 @@ final class StorageOptionsTest extends UnitTestCase
             createIfNotExists: false,
             busyTimeoutMs: 1000,
             readOnly: true,
-            durability: Durability::Synced
+            durability: Durability::Synced,
+            journalSizeLimitBytes: -1
         );
 
         $this->assertSame(Compression::Brotli, $options->defaultCompression);
@@ -60,5 +62,6 @@ final class StorageOptionsTest extends UnitTestCase
         $this->assertSame(1000, $options->busyTimeoutMs);
         $this->assertTrue($options->readOnly);
         $this->assertSame(Durability::Synced, $options->durability);
+        $this->assertSame(-1, $options->journalSizeLimitBytes);
     }
 }

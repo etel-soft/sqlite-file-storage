@@ -47,6 +47,13 @@ at a time): for small objects several times fewer than buffered.
 $storage = new StorageFactory()->open($path, new StorageOptions(durability: Durability::Synced));
 ```
 
+The log does not grow back to nothing by itself: after a large write SQLite starts it over from the beginning but
+keeps the file. A write connection cuts it back to `journalSizeLimitBytes` (`PRAGMA journal_size_limit`, 64 MiB by
+default; `-1` leaves it unbounded) when it starts the log over, so one large write leaves no log of its size behind.
+
+Opening an existing storage for writing takes no write lock: the schema is read as any other data, and only a new
+database (or one to migrate) is set up under `BEGIN IMMEDIATE`.
+
 ## Requirements
 
 PHP >= 8.4 with `ext-sqlite3`, `ext-zlib`.
