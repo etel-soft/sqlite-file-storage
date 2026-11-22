@@ -239,17 +239,15 @@ final class SqliteStorage implements Storage
         // A schema to create (or to migrate): the check is repeated under one write lock, as connections opening a
         // new database at once would otherwise all see no schema and all try to create it.
         $this->transactional(operation: function (): void {
-            if (!$this->schemaExists()) {
-                $this->createSchema();
+            if ($this->schemaExists()) {
+                // created meanwhile by another connection, or an older one: checked again under the lock (a newer
+                // one is refused). Sequential migration steps for future schema versions go here.
+                $this->schemaIsCurrent();
 
                 return;
             }
 
-            if ($this->schemaIsCurrent()) {
-                return; // another connection created it meanwhile
-            }
-
-            // Sequential migration steps for future schema versions go here.
+            $this->createSchema();
         });
     }
 

@@ -108,6 +108,22 @@ final class SqliteStorageEdgeCasesTest extends IntegrationTestCase
     }
 
     #[Test]
+    #[TestDox('A schema older than the library is checked again under the write lock and opens as it is')]
+    public function testOlderSchemaIsCheckedUnderTheWriteLock(): void
+    {
+        $path = $this->databasePath();
+        $storage = $this->openStorage();
+        $storage->putObject(key: 'kept.txt', content: 'kept');
+        $storage->close();
+
+        $raw = new SQLite3(filename: $path);
+        $raw->exec(query: "UPDATE storage_info SET value = '0' WHERE key = 'schema_version'");
+        $raw->close();
+
+        $this->assertSame('kept', $this->openStorage()->getObject(key: 'kept.txt')->getContents());
+    }
+
+    #[Test]
     #[TestDox('Opening an uninitialized database read-only is refused')]
     public function testReadOnlyOpenOfUninitializedDatabaseThrows(): void
     {
