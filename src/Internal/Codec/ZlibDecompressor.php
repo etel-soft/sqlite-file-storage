@@ -9,10 +9,11 @@ use Etel\SqliteFileStorage\Exception\StorageIoException;
 use InflateContext;
 use Override;
 
-use const ZLIB_FINISH;
 use const ZLIB_NO_FLUSH;
+use const ZLIB_STREAM_END;
 
 use function inflate_add;
+use function inflate_get_status;
 use function inflate_init;
 
 /**
@@ -20,14 +21,17 @@ use function inflate_init;
  *
  * @internal
  */
-final readonly class ZlibDecompressor implements Decompressor
+final class ZlibDecompressor implements Decompressor
 {
-    private InflateContext $context;
+    private readonly InflateContext $context;
+
+    /** Whether the compressed stream has reached its end */
+    private bool $ended = false;
 
     /**
-     * @param int $encoding one of the ZLIB_ENCODING_* constants
+     * @param int $encoding One of the ZLIB_ENCODING_* constants
      */
-    public function __construct(int $encoding)
+    public function __construct(private readonly int $encoding)
     {
         $context = inflate_init(encoding: $encoding);
 
@@ -41,11 +45,21 @@ final readonly class ZlibDecompressor implements Decompressor
     #[Override]
     public function add(string $chunk): string
     {
+        if ($chunk === '') {
+            return '';
+        }
+
+        if ($this->ended) {
+            throw ContentIntegrityException::detected(reason: 'data follows the end of the compressed stream');
+        }
+
         $output = @inflate_add(context: $this->context, data: $chunk, flush_mode: ZLIB_NO_FLUSH);
 
         if ($output === false) {
             throw ContentIntegrityException::detected(reason: 'compressed data is corrupted');
         }
+
+        $this->ended = inflate_get_status(context: $this->context) === ZLIB_STREAM_END;
 
         return $output;
     }
@@ -53,12 +67,17 @@ final readonly class ZlibDecompressor implements Decompressor
     #[Override]
     public function finish(): string
     {
-        $output = @inflate_add(context: $this->context, data: '', flush_mode: ZLIB_FINISH);
-
-        if ($output === false) {
-            throw ContentIntegrityException::detected(reason: 'compressed data is truncated'); // @codeCoverageIgnore
+        // inflate gives no error for a stream without its end: it waits for more
+        if (!$this->ended) {
+            throw ContentIntegrityException::detected(reason: 'compressed data is truncated');
         }
 
-        return $output;
+        return '';
+    }
+
+    #[Override]
+    public function restarted(): self
+    {
+        return new self(encoding: $this->encoding);
     }
 }

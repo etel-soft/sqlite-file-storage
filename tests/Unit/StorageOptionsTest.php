@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Etel\SqliteFileStorage\Tests\Unit;
 
 use Etel\SqliteFileStorage\ArrayKeyProvider;
+use Etel\SqliteFileStorage\AutoCompression;
 use Etel\SqliteFileStorage\Compression;
 use Etel\SqliteFileStorage\Durability;
 use Etel\SqliteFileStorage\Encryption;
@@ -36,6 +37,7 @@ final class StorageOptionsTest extends UnitTestCase
         $this->assertFalse($options->readOnly);
         $this->assertSame(Durability::Buffered, $options->durability);
         $this->assertSame(67_108_864, $options->journalSizeLimitBytes);
+        $this->assertNull($options->hashKeyId);
     }
 
     #[Test]
@@ -43,7 +45,6 @@ final class StorageOptionsTest extends UnitTestCase
     public function testCustomValues(): void
     {
         $keyProvider = new ArrayKeyProvider(keys: ['main' => str_repeat(string: 'A', times: 32)], currentKeyId: 'main');
-
         $options = new StorageOptions(
             defaultCompression: Compression::Brotli,
             defaultEncryption: Encryption::XChaCha20Poly1305,
@@ -52,8 +53,11 @@ final class StorageOptionsTest extends UnitTestCase
             busyTimeoutMs: 1000,
             readOnly: true,
             durability: Durability::Synced,
-            journalSizeLimitBytes: -1
+            journalSizeLimitBytes: -1,
+            hashKeyId: 'hash'
         );
+
+        $this->assertSame('hash', $options->hashKeyId);
 
         $this->assertSame(Compression::Brotli, $options->defaultCompression);
         $this->assertSame(Encryption::XChaCha20Poly1305, $options->defaultEncryption);
@@ -63,5 +67,14 @@ final class StorageOptionsTest extends UnitTestCase
         $this->assertTrue($options->readOnly);
         $this->assertSame(Durability::Synced, $options->durability);
         $this->assertSame(-1, $options->journalSizeLimitBytes);
+    }
+
+    #[Test]
+    #[TestDox('Takes a request to decide compression per object as its default')]
+    public function testAutoCompressionAsDefault(): void
+    {
+        $auto = new AutoCompression(algorithm: Compression::Gzip);
+
+        $this->assertSame($auto, new StorageOptions(defaultCompression: $auto)->defaultCompression);
     }
 }

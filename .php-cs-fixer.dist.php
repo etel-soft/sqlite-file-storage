@@ -21,6 +21,7 @@ return new Config()
         '@PHP8x2Migration' => true,
         '@PHP8x3Migration' => true,
         '@PHP8x4Migration' => true,
+        '@PHP8x5Migration' => true,
         '@PhpCsFixer' => true,
         'array_syntax' => ['syntax' => 'short'],
         'blank_line_before_statement' => [

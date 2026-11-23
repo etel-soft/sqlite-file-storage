@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Etel\SqliteFileStorage\Tests\Unit;
 
+use Etel\SqliteFileStorage\AutoCompression;
 use Etel\SqliteFileStorage\Compression;
 use Etel\SqliteFileStorage\Encryption;
 use Etel\SqliteFileStorage\PutOptions;
@@ -33,6 +34,7 @@ final class PutOptionsTest extends UnitTestCase
         $this->assertNull($options->mimeType);
         $this->assertSame([], $options->meta);
         $this->assertTrue($options->deduplicate);
+        $this->assertSame('', $options->associatedData);
     }
 
     #[Test]
@@ -47,7 +49,8 @@ final class PutOptionsTest extends UnitTestCase
             name: 'report.pdf',
             mimeType: 'application/pdf',
             meta: ['owner' => 'mykola', 'version' => 3],
-            deduplicate: false
+            deduplicate: false,
+            associatedData: 'bucket/ref'
         );
 
         $this->assertSame(Compression::Brotli, $options->compression);
@@ -58,5 +61,15 @@ final class PutOptionsTest extends UnitTestCase
         $this->assertSame('application/pdf', $options->mimeType);
         $this->assertSame(['owner' => 'mykola', 'version' => 3], $options->meta);
         $this->assertFalse($options->deduplicate);
+        $this->assertSame('bucket/ref', $options->associatedData);
+    }
+
+    #[Test]
+    #[TestDox('Takes a request to decide compression per object in place of an algorithm')]
+    public function testAutoCompression(): void
+    {
+        $auto = new AutoCompression();
+
+        $this->assertSame($auto, new PutOptions(compression: $auto)->compression);
     }
 }

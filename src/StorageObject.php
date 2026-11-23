@@ -28,7 +28,9 @@ final class StorageObject
     }
 
     /**
-     * @return resource read-only, non-seekable stream of the original content
+     * @return resource Read-only stream of the original content; it seeks at once when the content is stored as it
+     *                  is (neither compressed nor encrypted), by decoding up to the target otherwise — from the
+     *                  start of the content again for a seek back
      */
     public function getContentStream()
     {

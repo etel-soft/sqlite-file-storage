@@ -41,4 +41,15 @@ final class EncryptionKeyNotFoundExceptionTest extends UnitTestCase
         $this->assertInstanceOf(StorageException::class, $exception);
         $this->assertStringContainsString('KeyProvider', $exception->getMessage());
     }
+
+    #[Test]
+    #[TestDox('Method noKeyProviderForHashKey() reports the key provider missing for a hash key')]
+    public function testNoKeyProviderForHashKey(): void
+    {
+        $exception = EncryptionKeyNotFoundException::noKeyProviderForHashKey();
+
+        /* @noinspection PhpConditionAlreadyCheckedInspection */
+        $this->assertInstanceOf(StorageException::class, $exception);
+        $this->assertStringContainsString('hash key', $exception->getMessage());
+    }
 }

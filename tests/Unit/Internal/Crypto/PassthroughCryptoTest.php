@@ -42,4 +42,13 @@ final class PassthroughCryptoTest extends UnitTestCase
     {
         $this->assertSame('', new PassthroughCrypto()->header());
     }
+
+    #[Test]
+    #[TestDox('Restarted, it is itself: it keeps no state')]
+    public function testRestartedIsItself(): void
+    {
+        $crypto = new PassthroughCrypto();
+
+        $this->assertSame($crypto, $crypto->restarted());
+    }
 }

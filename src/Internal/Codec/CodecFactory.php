@@ -43,7 +43,9 @@ final readonly class CodecFactory
     private static function assertBrotli(): void
     {
         if (!function_exists(function: 'brotli_compress_init')) {
-            throw CompressionNotAvailableException::forAlgorithm(compression: Compression::Brotli); // @codeCoverageIgnore
+            // @codeCoverageIgnoreStart
+            throw CompressionNotAvailableException::forAlgorithm(compression: Compression::Brotli);
+            // @codeCoverageIgnoreEnd
         }
     }
 

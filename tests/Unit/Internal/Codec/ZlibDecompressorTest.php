@@ -71,4 +71,54 @@ final class ZlibDecompressorTest extends UnitTestCase
 
         $decompressor->add(chunk: $corrupted) . $decompressor->finish();
     }
+
+    #[Test]
+    #[TestDox('Restarted, it decodes the same format from the start of a stream again')]
+    public function testRestartedDecodesFromTheStart(): void
+    {
+        $original = str_repeat(string: 'decompressor payload. ', times: 4000);
+        $compressor = new ZlibCompressor(encoding: ZLIB_ENCODING_DEFLATE);
+        $compressed = $compressor->add(chunk: $original) . $compressor->finish();
+        $decompressor = new ZlibDecompressor(encoding: ZLIB_ENCODING_DEFLATE);
+        $decompressor->add(chunk: substr(string: $compressed, offset: 0, length: 100));
+
+        $restarted = $decompressor->restarted();
+
+        $this->assertNotSame($decompressor, $restarted);
+        $this->assertSame($original, $restarted->add(chunk: $compressed) . $restarted->finish());
+    }
+
+    #[Test]
+    #[TestDox('A stream without its end is truncated: inflate itself would only wait for more')]
+    public function testThrowsOnTruncatedStream(): void
+    {
+        $compressor = new ZlibCompressor(encoding: ZLIB_ENCODING_DEFLATE);
+        $compressed = $compressor->add(chunk: str_repeat(string: 'truncated payload. ', times: 4000))
+            . $compressor->finish();
+
+        $decompressor = new ZlibDecompressor(encoding: ZLIB_ENCODING_DEFLATE);
+        $decompressor->add(chunk: substr(string: $compressed, offset: 0, length: -5));
+
+        $this->expectException(ContentIntegrityException::class);
+        $this->expectExceptionMessageIsOrContains('truncated');
+
+        $decompressor->finish();
+    }
+
+    #[Test]
+    #[TestDox('Data given after the end of the stream is refused')]
+    public function testThrowsOnDataAfterTheEnd(): void
+    {
+        $compressor = new ZlibCompressor(encoding: ZLIB_ENCODING_DEFLATE);
+        $compressed = $compressor->add(chunk: 'payload') . $compressor->finish();
+
+        $decompressor = new ZlibDecompressor(encoding: ZLIB_ENCODING_DEFLATE);
+        $this->assertSame('payload', $decompressor->add(chunk: $compressed));
+        $this->assertSame('', $decompressor->add(chunk: ''));
+
+        $this->expectException(ContentIntegrityException::class);
+        $this->expectExceptionMessageIsOrContains('follows the end');
+
+        $decompressor->add(chunk: 'garbage');
+    }
 }

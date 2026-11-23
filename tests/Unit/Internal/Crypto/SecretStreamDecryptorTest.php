@@ -11,6 +11,7 @@ use Etel\SqliteFileStorage\Tests\UnitTestCase;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\Attributes\TestDox;
+use PHPUnit\Framework\Attributes\TestWith;
 
 use function str_repeat;
 
@@ -69,5 +70,46 @@ final class SecretStreamDecryptorTest extends UnitTestCase
         $this->expectException(ContentIntegrityException::class);
 
         $decryptor->decryptChunk(ciphertext: $nonFinal, final: true);
+    }
+
+    #[Test]
+    #[TestDox('A stream bound to associated data fails its first chunk with other data, or none')]
+    #[TestWith(['other/ref'])]
+    #[TestWith([''])]
+    public function testOtherAssociatedDataFailsIntegrity(string $associatedData): void
+    {
+        $key = str_repeat(string: 'A', times: 32);
+        $encryptor = new SecretStreamEncryptor(key: $key, associatedData: 'bucket/ref');
+        $ciphertext = $encryptor->encryptChunk(plaintext: 'top secret', final: true);
+
+        $decryptor = new SecretStreamDecryptor(
+            key: $key,
+            header: $encryptor->header(),
+            associatedData: $associatedData
+        );
+
+        $this->expectException(ContentIntegrityException::class);
+        $this->expectExceptionMessageIsOrContains('wrong associated data');
+
+        $decryptor->decryptChunk(ciphertext: $ciphertext, final: true);
+    }
+
+    #[Test]
+    #[TestDox('Restarted, it decrypts the stream from its first chunk again, with the same associated data')]
+    public function testRestartedDecryptsFromTheFirstChunk(): void
+    {
+        $key = str_repeat(string: 'A', times: 32);
+        $encryptor = new SecretStreamEncryptor(key: $key, associatedData: 'bucket/a');
+        $first = $encryptor->encryptChunk(plaintext: 'first', final: false);
+        $second = $encryptor->encryptChunk(plaintext: 'second', final: true);
+        $decryptor = new SecretStreamDecryptor(key: $key, header: $encryptor->header(), associatedData: 'bucket/a');
+        $decryptor->decryptChunk(ciphertext: $first, final: false);
+        $decryptor->decryptChunk(ciphertext: $second, final: true);
+
+        $restarted = $decryptor->restarted();
+
+        $this->assertNotSame($decryptor, $restarted);
+        $this->assertSame('first', $restarted->decryptChunk(ciphertext: $first, final: false));
+        $this->assertSame('second', $restarted->decryptChunk(ciphertext: $second, final: true));
     }
 }

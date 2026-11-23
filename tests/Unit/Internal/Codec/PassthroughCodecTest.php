@@ -33,4 +33,13 @@ final class PassthroughCodecTest extends UnitTestCase
 
         $this->assertSame('', $codec->finish());
     }
+
+    #[Test]
+    #[TestDox('Restarted, it is itself: it keeps no state')]
+    public function testRestartedIsItself(): void
+    {
+        $codec = new PassthroughCodec();
+
+        $this->assertSame($codec, $codec->restarted());
+    }
 }

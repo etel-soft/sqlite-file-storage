@@ -14,7 +14,7 @@
         }
     ],
     "require": {
-        "php": ">=8.4",
+        "php": ">=8.5",
         "ext-json": "*",
         "ext-sqlite3": "*",
         "ext-zlib": "*"
@@ -24,7 +24,7 @@
         "etel/phpunit-double": "^0.1.0",
         "friendsofphp/php-cs-fixer": "^3.94",
         "phpstan/phpstan": "^2.1",
-        "phpunit/phpunit": "^13.0"
+        "phpunit/phpunit": "^13.2"
     },
     "suggest": {
         "ext-brotli": "Enables Brotli compression",

@@ -12,6 +12,7 @@ use PHPUnit\Framework\Attributes\TestDox;
 
 use const JSON_THROW_ON_ERROR;
 
+use function array_map;
 use function json_encode;
 
 /**
@@ -29,6 +30,16 @@ final class CompressionTest extends UnitTestCase
         $this->assertSame('gzip', Compression::Gzip->value);
         $this->assertSame('none', Compression::None->value);
         $this->assertSame('zlib', Compression::Zlib->value);
+    }
+
+    #[Test]
+    #[TestDox('Only algorithms are cases: deciding per object is an AutoCompression, never stored')]
+    public function testOnlyAlgorithmsAreCases(): void
+    {
+        $this->assertSame(
+            ['brotli', 'deflate', 'gzip', 'none', 'zlib'],
+            array_map(callback: static fn (Compression $case): string => $case->value, array: Compression::cases())
+        );
     }
 
     #[Test]

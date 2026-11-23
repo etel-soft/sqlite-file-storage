@@ -11,7 +11,7 @@ namespace Etel\SqliteFileStorage;
 final readonly class EncodedContent
 {
     public function __construct(
-        /** sha256 hex of the original (plain) content */
+        /** sha256 hex of the original (plain) content; its HMAC-SHA256 where the codec has a hash key */
         public string $hash,
         /** Original content size in bytes */
         public int $size,
@@ -19,6 +19,7 @@ final readonly class EncodedContent
         public int $storedSize,
         /** Detected from the leading plain bytes; null when undetectable */
         public ?string $mimeType,
+        /** The compression applied: the requested one, or what an AutoCompression chose */
         public Compression $compression,
         public Encryption $encryption,
         /** Key id used for encryption; null when not encrypted */

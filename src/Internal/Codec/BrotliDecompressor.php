@@ -1,5 +1,7 @@
 <?php
 
+/* @noinspection PhpComposerExtensionStubsInspection */
+
 declare(strict_types=1);
 
 namespace Etel\SqliteFileStorage\Internal\Codec;
@@ -56,5 +58,11 @@ final readonly class BrotliDecompressor implements Decompressor
         }
 
         return $output;
+    }
+
+    #[Override]
+    public function restarted(): self
+    {
+        return new self();
     }
 }

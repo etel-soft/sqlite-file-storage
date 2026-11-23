@@ -11,6 +11,9 @@ use Override;
  * Supported content compression algorithms.
  *
  * Brotli requires the optional ext-brotli extension; the zlib family is always available.
+ *
+ * To let the writer decide per object whether content is worth compressing, ask for an {@see AutoCompression}
+ * instead: what is stored, and reported back, is always one of these — the compression actually applied.
  */
 enum Compression: string implements JsonSerializable
 {

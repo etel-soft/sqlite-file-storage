@@ -57,4 +57,20 @@ final class SecretStreamEncryptorTest extends UnitTestCase
         $this->assertSame('first chunk ', $decryptor->decryptChunk(ciphertext: $first, final: false));
         $this->assertSame('last chunk', $decryptor->decryptChunk(ciphertext: $last, final: true));
     }
+
+    #[Test]
+    #[TestDox('Associated data goes with the first chunk: the stream decrypts with the same data, chunk after chunk')]
+    public function testAssociatedDataGoesWithTheFirstChunk(): void
+    {
+        $key = str_repeat(string: 'A', times: 32);
+        $encryptor = new SecretStreamEncryptor(key: $key, associatedData: 'bucket/ref');
+
+        $first = $encryptor->encryptChunk(plaintext: 'first chunk ', final: false);
+        $last = $encryptor->encryptChunk(plaintext: 'last chunk', final: true);
+
+        $decryptor = new SecretStreamDecryptor(key: $key, header: $encryptor->header(), associatedData: 'bucket/ref');
+
+        $this->assertSame('first chunk ', $decryptor->decryptChunk(ciphertext: $first, final: false));
+        $this->assertSame('last chunk', $decryptor->decryptChunk(ciphertext: $last, final: true));
+    }
 }

@@ -32,6 +32,7 @@ final class ListObjectsTest extends IntegrationTestCase
             $this->keysOf(infos: iterator_to_array(iterator: $storage->listObjects(prefix: 'a/'), preserve_keys: false))
         );
 
+        /* @noinspection PhpPipeOperatorCanBeUsedInspection */
         $this->assertSame(
             ['a/1.txt', 'a/2.txt', 'a/sub/3.txt', 'b/1.txt'],
             $this->keysOf(infos: iterator_to_array(iterator: $storage->listObjects(), preserve_keys: false))
@@ -72,6 +73,81 @@ final class ListObjectsTest extends IntegrationTestCase
         ));
 
         $this->assertSame(['k/2', 'k/3'], $keys);
+    }
+
+    #[Test]
+    #[TestDox('Matches the prefix byte by byte: keys differing in case are other keys')]
+    public function testPrefixIsCaseSensitive(): void
+    {
+        $storage = $this->openStorage();
+
+        foreach (['Invoices/a', 'invoices/b', 'INVOICES/c', 'invoices0', 'invoices.'] as $key) {
+            $storage->putObject(key: $key, content: $key);
+        }
+
+        $this->assertSame(
+            ['invoices/b'],
+            $this->keysOf(infos: iterator_to_array(
+                iterator: $storage->listObjects(prefix: 'invoices/'),
+                preserve_keys: false
+            ))
+        );
+    }
+
+    #[Test]
+    #[TestDox('Lists the keys under a prefix ending in the highest byte, and under a multibyte one')]
+    public function testPrefixEndingInHighestByte(): void
+    {
+        $storage = $this->openStorage();
+
+        foreach (["a\xFF", "a\xFF\xFFz", "a\xFFb", "a\xFE", 'b', 'я/1', 'я/2', 'ѐ'] as $key) {
+            $storage->putObject(key: $key, content: 'x');
+        }
+
+        $this->assertSame(
+            ["a\xFF", "a\xFFb", "a\xFF\xFFz"],
+            $this->keysOf(infos: iterator_to_array(
+                iterator: $storage->listObjects(prefix: "a\xFF"),
+                preserve_keys: false
+            ))
+        );
+        $this->assertSame(
+            ["a\xFF\xFFz"],
+            $this->keysOf(infos: iterator_to_array(
+                iterator: $storage->listObjects(prefix: "a\xFF\xFF", limit: 1),
+                preserve_keys: false
+            ))
+        );
+        $this->assertSame(
+            ['я/1', 'я/2'],
+            $this->keysOf(infos: iterator_to_array(iterator: $storage->listObjects(prefix: 'я/'), preserve_keys: false))
+        );
+    }
+
+    #[Test]
+    #[TestDox('A cursor before the prefix does not widen the listing, one past it empties it')]
+    public function testAfterKeyOutsideThePrefix(): void
+    {
+        $storage = $this->openStorage();
+
+        foreach (['a/1', 'k/1', 'k/2', 'z/1'] as $key) {
+            $storage->putObject(key: $key, content: $key);
+        }
+
+        $this->assertSame(
+            ['k/1', 'k/2'],
+            $this->keysOf(infos: iterator_to_array(
+                iterator: $storage->listObjects(prefix: 'k/', afterKey: 'a/0'),
+                preserve_keys: false
+            ))
+        );
+        $this->assertSame(
+            [],
+            $this->keysOf(infos: iterator_to_array(
+                iterator: $storage->listObjects(prefix: 'k/', afterKey: 'z/0'),
+                preserve_keys: false
+            ))
+        );
     }
 
     #[Test]

@@ -38,7 +38,8 @@ final class ObjectInfoTest extends UnitTestCase
             encryption: Encryption::XChaCha20Poly1305,
             meta: ['owner' => 'mykola'],
             createdAt: $createdAt,
-            updatedAt: $updatedAt
+            updatedAt: $updatedAt,
+            boundToAssociatedData: true
         );
 
         $this->assertSame('01890a5d-ac96-774b-bcce-b302099a8057', $info->id);
@@ -53,6 +54,7 @@ final class ObjectInfoTest extends UnitTestCase
         $this->assertSame(['owner' => 'mykola'], $info->meta);
         $this->assertSame($createdAt, $info->createdAt);
         $this->assertSame($updatedAt, $info->updatedAt);
+        $this->assertTrue($info->boundToAssociatedData);
     }
 
     #[Test]
@@ -76,5 +78,6 @@ final class ObjectInfoTest extends UnitTestCase
 
         $this->assertNull($info->mimeType);
         $this->assertNull($info->updatedAt);
+        $this->assertFalse($info->boundToAssociatedData);
     }
 }

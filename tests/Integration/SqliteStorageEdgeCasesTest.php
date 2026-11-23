@@ -6,23 +6,32 @@ declare(strict_types=1);
 
 namespace Etel\SqliteFileStorage\Tests\Integration;
 
+use Etel\SqliteFileStorage\Compression;
 use Etel\SqliteFileStorage\Encryption;
 use Etel\SqliteFileStorage\Exception\ContentIntegrityException;
 use Etel\SqliteFileStorage\Exception\ObjectNotFoundException;
 use Etel\SqliteFileStorage\Exception\StorageIoException;
 use Etel\SqliteFileStorage\Exception\StorageNotInitializedException;
 use Etel\SqliteFileStorage\PutOptions;
+use Etel\SqliteFileStorage\SqliteStorage;
 use Etel\SqliteFileStorage\StorageOptions;
 use Etel\SqliteFileStorage\Tests\IntegrationTestCase;
 use InvalidArgumentException;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\Attributes\TestDox;
+use PHPUnit\Framework\Attributes\TestWith;
 use SQLite3;
 
+use const NAN;
+use const PHP_INT_MAX;
+
+use function fclose;
+use function iterator_to_array;
+use function random_bytes;
+
 /**
- * Edge cases of the SQLite storage engine that the happy-path integration
- * tests do not exercise: validation guards, schema/version checks and content
- * rows deliberately corrupted out-of-band.
+ * Edge cases of the SQLite storage engine that the happy-path integration tests do not exercise: validation guards,
+ * schema/version checks and content rows deliberately corrupted out-of-band.
  *
  * @internal
  */
@@ -181,5 +190,243 @@ final class SqliteStorageEdgeCasesTest extends IntegrationTestCase
 
         $this->openStorage(options: new StorageOptions(keyProvider: $this->keyProvider()))
             ->getObject(key: 'secret.bin');
+    }
+
+    #[Test]
+    #[TestDox('A context that is no JSON fails the read of its object only: metadata reads and writes go on')]
+    public function testBrokenEncryptionContextFailsItsReadOnly(): void
+    {
+        $path = $this->databasePath();
+        $options = new PutOptions(encryption: Encryption::XChaCha20Poly1305, associatedData: 'bucket/a');
+        $storage = $this->openStorage(options: new StorageOptions(keyProvider: $this->keyProvider()));
+        $info = $storage->putObject(key: 'broken.bin', content: 'classified', options: $options);
+        $storage->close();
+
+        $raw = new SQLite3(filename: $path);
+        $raw->exec(query: "UPDATE contents SET enc_context = '{broken'");
+        $raw->close();
+
+        $storage = $this->openStorage(options: new StorageOptions(keyProvider: $this->keyProvider()));
+
+        $this->assertFalse($storage->headObject(key: 'broken.bin')->boundToAssociatedData);
+        $this->assertCount(1, iterator_to_array(iterator: $storage->listObjects(), preserve_keys: false));
+        $this->assertSame('broken.bin', $storage->findByHash(hash: $info->hash)?->key);
+
+        // the same content is not shared with the broken record, but written anew, and then shared
+        $storage->putObject(key: 'second.bin', content: 'classified', options: $options);
+        $storage->putObject(key: 'third.bin', content: 'classified', options: $options);
+        $this->assertSame(2, $storage->getStats()->contentCount);
+        $third = $storage->getObject(key: 'third.bin', associatedData: 'bucket/a');
+        $this->assertSame('classified', $third->getContents());
+
+        $this->expectException(ContentIntegrityException::class);
+        $this->expectExceptionMessageIsOrContains('malformed encryption context');
+
+        $storage->getObject(key: 'broken.bin', associatedData: 'bucket/a');
+    }
+
+    #[Test]
+    #[TestDox('A write SQLite rolls back itself (a full database) fails with its cause, and leaves no trace')]
+    public function testWriteRolledBackBySqliteFailsWithItsCause(): void
+    {
+        $this->openStorage()->close();
+        $db = new SQLite3(filename: $this->databasePath());
+        $db->enableExceptions(enable: true);
+        $storage = new SqliteStorage(db: $db, options: new StorageOptions());
+        $storage->putObject(key: 'kept.txt', content: 'kept');
+        $db->exec(query: 'PRAGMA max_page_count = 40');
+
+        try {
+            $storage->putObject(
+                key: 'large.bin',
+                content: random_bytes(length: 4 * 1024 * 1024),
+                options: new PutOptions(compression: Compression::None)
+            );
+            $this->fail('A write past the size of the database went through.');
+        } catch (StorageIoException $exception) {
+            $this->assertStringContainsString('full', $exception->getMessage());
+        }
+
+        $this->assertFalse($storage->hasObject(key: 'large.bin'));
+        $this->assertSame(1, $storage->getStats()->contentCount);
+        $storage->putObject(key: 'small.txt', content: 'small');
+        $this->assertSame('small', $storage->getObject(key: 'small.txt')->getContents());
+        $storage->close();
+    }
+
+    #[Test]
+    #[TestDox('A key with a NUL byte is rejected wherever a key is written: SQLite would give it back cut')]
+    public function testKeyWithNulByteIsRejected(): void
+    {
+        $storage = $this->openStorage();
+        $storage->putObject(key: 'a', content: 'data');
+
+        foreach (
+            [
+                static fn () => $storage->putObject(key: "a\0b", content: 'data'),
+                static fn () => $storage->copyObject(sourceKey: 'a', targetKey: "a\0b"),
+                static fn () => $storage->moveObject(sourceKey: 'a', targetKey: "a\0b"),
+            ] as $write
+        ) {
+            try {
+                $write();
+                $this->fail('A key with a NUL byte was written.');
+            } catch (InvalidArgumentException $exception) {
+                $this->assertStringContainsString('NUL byte', $exception->getMessage());
+            }
+        }
+
+        $this->assertSame(1, $storage->getStats()->objectCount);
+    }
+
+    #[Test]
+    #[TestDox('An id, a name and a mime type with a NUL byte are rejected')]
+    #[TestWith(['id'])]
+    #[TestWith(['name'])]
+    #[TestWith(['mimeType'])]
+    public function testTextWithNulByteIsRejected(string $field): void
+    {
+        $storage = $this->openStorage();
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessageIsOrContains('NUL byte');
+
+        $storage->putObject(
+            key: 'a',
+            content: 'data',
+            options: match ($field) {
+                'id' => new PutOptions(id: "x\0y"),
+                'name' => new PutOptions(name: "x\0y"),
+                default => new PutOptions(mimeType: "x\0y"),
+            }
+        );
+    }
+
+    #[Test]
+    #[TestDox('Meta that cannot be stored is refused before anything is written')]
+    public function testMetaThatCannotBeEncodedIsRefused(): void
+    {
+        $storage = $this->openStorage();
+        $storage->putObject(key: 'kept', content: 'data', options: new PutOptions(meta: ['a' => 1]));
+
+        foreach (
+            [
+                static fn () => $storage->putObject(
+                    key: 'new',
+                    content: 'data',
+                    options: new PutOptions(meta: ['a' => "\xFF"])
+                ),
+                static fn () => $storage->updateObjectMeta(key: 'kept', meta: ['a' => NAN]),
+            ] as $write
+        ) {
+            try {
+                $write();
+                $this->fail('Meta that cannot be encoded was stored.');
+            } catch (InvalidArgumentException $exception) {
+                $this->assertStringContainsString('meta', $exception->getMessage());
+            }
+        }
+
+        $this->assertFalse($storage->hasObject(key: 'new'));
+        $this->assertSame(['a' => 1], $storage->headObject(key: 'kept')->meta);
+        $this->assertSame(1, $storage->getStats()->contentCount);
+    }
+
+    #[Test]
+    #[TestDox('A meta that is no JSON reads as none, and fails neither its object nor a listing')]
+    public function testBrokenMetaReadsAsNone(): void
+    {
+        $path = $this->databasePath();
+        $storage = $this->openStorage();
+        $storage->putObject(key: 'broken.txt', content: 'data', options: new PutOptions(meta: ['a' => 1]));
+        $storage->putObject(key: 'whole.txt', content: 'other', options: new PutOptions(meta: ['b' => 2]));
+        $storage->close();
+
+        $raw = new SQLite3(filename: $path);
+        $raw->exec(query: "UPDATE objects SET meta = '{broken' WHERE key = 'broken.txt'");
+        $raw->close();
+
+        $storage = $this->openStorage();
+        $listed = iterator_to_array(iterator: $storage->listObjects(), preserve_keys: false);
+
+        $this->assertCount(2, $listed);
+        $this->assertSame([], $listed[0]->meta);
+        $this->assertSame(['b' => 2], $listed[1]->meta);
+        $this->assertSame('data', $storage->getObject(key: 'broken.txt')->getContents());
+    }
+
+    #[Test]
+    #[TestDox('A chunk size out of range in a record is a malformed context, not a chunk to read')]
+    #[TestWith([-17])]
+    #[TestWith([0])]
+    #[TestWith([1_099_511_627_776])]
+    #[TestWith([PHP_INT_MAX])]
+    public function testChunkSizeOutOfRangeIsDetected(int $chunkSize): void
+    {
+        $path = $this->databasePath();
+        $storage = $this->openStorage(options: new StorageOptions(keyProvider: $this->keyProvider()));
+        $storage->putObject(
+            key: 'secret.bin',
+            content: 'classified',
+            options: new PutOptions(encryption: Encryption::XChaCha20Poly1305)
+        );
+        $storage->close();
+
+        $raw = new SQLite3(filename: $path);
+        $raw->exec(
+            query: "UPDATE contents SET enc_context = json_set(enc_context, '$.chunk_size', {$chunkSize})"
+        );
+        $raw->close();
+
+        $this->expectException(ContentIntegrityException::class);
+        $this->expectExceptionMessageIsOrContains('malformed encryption context');
+
+        $this->openStorage(options: new StorageOptions(keyProvider: $this->keyProvider()))
+            ->getObject(key: 'secret.bin');
+    }
+
+    #[Test]
+    #[TestDox('Content cut short in the record does not read as whole, compressed or not')]
+    #[TestWith([Compression::None])]
+    #[TestWith([Compression::Zlib])]
+    public function testContentCutShortIsDetected(Compression $compression): void
+    {
+        $path = $this->databasePath();
+        $storage = $this->openStorage();
+        $storage->putObject(
+            key: 'cut.bin',
+            content: random_bytes(length: 4096),
+            options: new PutOptions(compression: $compression)
+        );
+        $storage->close();
+
+        $raw = new SQLite3(filename: $path);
+        $raw->exec(query: 'UPDATE contents SET stored_size = stored_size - 20');
+        $raw->close();
+
+        $object = $this->openStorage()->getObject(key: 'cut.bin');
+
+        $this->expectException(ContentIntegrityException::class);
+
+        $object->getContents();
+    }
+
+    #[Test]
+    #[TestDox('Closing a storage whose content stream is still open fails as a storage error')]
+    public function testCloseWithOpenContentStreamFailsAsStorageError(): void
+    {
+        $storage = $this->openStorage();
+        $storage->putObject(key: 'a', content: 'data');
+        $stream = $storage->getObject(key: 'a')->getContentStream();
+
+        try {
+            $storage->close();
+            $this->fail('A storage with an open content stream was closed.');
+        } catch (StorageIoException $exception) {
+            $this->assertStringContainsString('SQLite error', $exception->getMessage());
+        }
+
+        fclose(stream: $stream);
+        $storage->close();
     }
 }

@@ -17,4 +17,9 @@ final class EncryptionKeyNotFoundException extends StorageException
     {
         return new self(message: 'Encryption is requested but no KeyProvider is configured for the storage.');
     }
+
+    public static function noKeyProviderForHashKey(): self
+    {
+        return new self(message: 'A hash key is set but no KeyProvider is configured to give it.');
+    }
 }

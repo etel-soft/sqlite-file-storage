@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Etel\SqliteFileStorage\Tests\Unit;
 
+use Etel\SqliteFileStorage\ArrayKeyProvider;
+use Etel\SqliteFileStorage\AutoCompression;
 use Etel\SqliteFileStorage\Compression;
 use Etel\SqliteFileStorage\EncodedContent;
 use Etel\SqliteFileStorage\Encryption;
@@ -12,10 +14,14 @@ use Etel\SqliteFileStorage\Exception\InvalidEncryptionKeyException;
 use Etel\SqliteFileStorage\FileCodec;
 use Etel\SqliteFileStorage\KeyProvider;
 use Etel\SqliteFileStorage\Tests\UnitTestCase;
+use InvalidArgumentException;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\Attributes\TestDox;
+use PHPUnit\Framework\Attributes\TestWith;
+
+use const PHP_INT_MAX;
 
 use function fopen;
 use function fseek;
@@ -77,6 +83,57 @@ final class FileCodecTest extends UnitTestCase
                 yield $compression->value . ' + ' . $encryption->value => [$compression, $encryption];
             }
         }
+    }
+
+    #[Test]
+    #[TestDox('Without a hash key contentHash() is the SHA-256 that encode() gives')]
+    public function testContentHashWithoutKeyIsSha256(): void
+    {
+        $codec = new FileCodec();
+
+        [$encoded] = $this->encodeToTemp(
+            codec: $codec,
+            content: 'known file',
+            compression: Compression::None,
+            encryption: Encryption::None
+        );
+
+        $this->assertSame(hash(algo: 'sha256', data: 'known file'), $encoded->hash);
+        $this->assertSame($encoded->hash, $codec->contentHash(content: 'known file'));
+    }
+
+    #[Test]
+    #[TestDox('With a hash key encode() gives a keyed hash, the one contentHash() gives, and the content decodes')]
+    public function testHashKeyGivesKeyedHash(): void
+    {
+        $codec = new FileCodec(
+            keyProvider: new ArrayKeyProvider(
+                keys: ['hash' => str_repeat(string: 'H', times: 32)],
+                currentKeyId: 'hash'
+            ),
+            hashKeyId: 'hash'
+        );
+
+        [$encoded, $file] = $this->encodeToTemp(
+            codec: $codec,
+            content: 'known file',
+            compression: Compression::Zlib,
+            encryption: Encryption::None
+        );
+
+        $this->assertMatchesRegularExpression('/^[0-9a-f]{64}$/', $encoded->hash);
+        $this->assertNotSame(hash(algo: 'sha256', data: 'known file'), $encoded->hash);
+        $this->assertSame($encoded->hash, $codec->contentHash(content: 'known file'));
+
+        $decoded = $codec->decode(
+            source: $file,
+            storedSize: $encoded->storedSize,
+            plainSize: $encoded->size,
+            compression: $encoded->compression,
+            encryption: Encryption::None
+        );
+
+        $this->assertSame('known file', stream_get_contents(stream: $decoded));
     }
 
     #[Test]
@@ -272,6 +329,187 @@ final class FileCodecTest extends UnitTestCase
         );
     }
 
+    #[Test]
+    #[TestDox('Auto reports the compression it applied, and the content decodes with it')]
+    #[TestWith(['random', 'none'])]
+    #[TestWith(['text', 'zlib'])]
+    public function testAutoReportsTheAppliedCompression(string $kind, string $applied): void
+    {
+        $codec = $this->stubbedCodec();
+        $content = $kind === 'random'
+            ? random_bytes(length: 300_000)
+            : str_repeat(string: 'text, ', times: 50_000);
+
+        [$encoded, $file] = $this->encodeToTemp(
+            codec: $codec,
+            content: $content,
+            compression: new AutoCompression(),
+            encryption: Encryption::XChaCha20Poly1305
+        );
+
+        $this->assertSame(Compression::from(value: $applied), $encoded->compression);
+
+        $decoded = $codec->decode(
+            source: $file,
+            storedSize: $encoded->storedSize,
+            plainSize: $encoded->size,
+            compression: $encoded->compression,
+            encryption: Encryption::XChaCha20Poly1305,
+            encryptionKeyId: $encoded->encryptionKeyId,
+            encryptionHeader: $encoded->encryptionHeader
+        );
+
+        $this->assertSame($content, stream_get_contents(stream: $decoded));
+    }
+
+    #[Test]
+    #[TestDox('Content bound to associated data decodes with the same data and fails with other')]
+    public function testAssociatedDataBindsTheContent(): void
+    {
+        $codec = $this->stubbedCodec();
+        $content = random_bytes(length: 600_000);
+
+        [$encoded, $file] = $this->encodeToTemp(
+            codec: $codec,
+            content: $content,
+            compression: Compression::None,
+            encryption: Encryption::XChaCha20Poly1305,
+            associatedData: 'bucket/ref-1'
+        );
+
+        // decoding closes the stream it reads: the second read gets a copy of the bytes
+        $copy = fopen(filename: 'php://temp', mode: 'r+b');
+        $this->assertIsResource($copy);
+        fwrite(stream: $copy, data: (string) stream_get_contents(stream: $file));
+        rewind(stream: $copy);
+        rewind(stream: $file);
+
+        $this->assertSame($content, stream_get_contents(stream: $this->decodeBound(
+            codec: $codec,
+            encoded: $encoded,
+            file: $file,
+            associatedData: 'bucket/ref-1'
+        )));
+
+        $moved = $this->decodeBound(codec: $codec, encoded: $encoded, file: $copy, associatedData: 'bucket/ref-2');
+
+        $this->expectException(ContentIntegrityException::class);
+
+        stream_get_contents(stream: $moved);
+    }
+
+    #[Test]
+    #[TestDox('Associated data without encryption is refused: nothing would hold it')]
+    public function testAssociatedDataWithoutEncryptionIsRefused(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessageIsOrContains('encrypted content only');
+
+        $this->encodeToTemp(
+            codec: $this->stubbedCodec(),
+            content: 'plain bytes',
+            compression: Compression::None,
+            encryption: Encryption::None,
+            associatedData: 'bucket/ref-1'
+        );
+    }
+
+    #[Test]
+    #[TestDox('Plain content is refused when associated data is given to decode it')]
+    public function testPlainContentIsRefusedWithAssociatedData(): void
+    {
+        $codec = $this->stubbedCodec();
+
+        [$encoded, $file] = $this->encodeToTemp(
+            codec: $codec,
+            content: 'plain bytes',
+            compression: Compression::None,
+            encryption: Encryption::None
+        );
+
+        $this->expectException(ContentIntegrityException::class);
+        $this->expectExceptionMessageIsOrContains('content is not encrypted');
+
+        $this->decodeBound(codec: $codec, encoded: $encoded, file: $file, associatedData: 'bucket/ref-1');
+    }
+
+    #[Test]
+    #[TestDox('A stored file cut short does not decode as whole')]
+    public function testTruncatedPlainContentFails(): void
+    {
+        $codec = new FileCodec();
+        $source = fopen(filename: 'php://temp', mode: 'r+b');
+        $target = fopen(filename: 'php://temp', mode: 'r+b');
+        $this->assertIsResource($source);
+        $this->assertIsResource($target);
+        fwrite(stream: $source, data: str_repeat(string: 'hello world ', times: 5000));
+        rewind(stream: $source);
+
+        $encoded = $codec->encode(
+            source: $source,
+            target: $target,
+            compression: Compression::Zlib,
+            encryption: Encryption::None
+        );
+        rewind(stream: $target);
+
+        $decoded = $codec->decode(
+            source: $target,
+            storedSize: $encoded->storedSize - 20,
+            plainSize: $encoded->size,
+            compression: $encoded->compression,
+            encryption: $encoded->encryption
+        );
+
+        $this->expectException(ContentIntegrityException::class);
+
+        stream_get_contents(stream: $decoded);
+    }
+
+    #[Test]
+    #[TestDox('A chunk size out of range is refused for encrypted content')]
+    #[TestWith([0])]
+    #[TestWith([-17])]
+    #[TestWith([PHP_INT_MAX])]
+    public function testChunkSizeOutOfRangeIsRefused(int $chunkSize): void
+    {
+        $source = fopen(filename: 'php://temp', mode: 'r+b');
+        $this->assertIsResource($source);
+
+        $this->expectException(ContentIntegrityException::class);
+        $this->expectExceptionMessageIsOrContains('malformed chunk size');
+
+        new FileCodec()->decode(
+            source: $source,
+            storedSize: 17,
+            plainSize: 0,
+            compression: Compression::None,
+            encryption: Encryption::XChaCha20Poly1305,
+            encryptionKeyId: 'k1',
+            encryptionHeader: 'AAAA',
+            chunkSize: $chunkSize
+        );
+    }
+
+    /**
+     * @param resource $file
+     *
+     * @return resource
+     */
+    private function decodeBound(FileCodec $codec, EncodedContent $encoded, mixed $file, string $associatedData)
+    {
+        return $codec->decode(
+            source: $file,
+            storedSize: $encoded->storedSize,
+            plainSize: $encoded->size,
+            compression: $encoded->compression,
+            encryption: $encoded->encryption,
+            encryptionKeyId: $encoded->encryptionKeyId,
+            encryptionHeader: $encoded->encryptionHeader,
+            associatedData: $associatedData
+        );
+    }
+
     private function stubbedCodec(string $keySeed = 'A'): FileCodec
     {
         return new FileCodec(keyProvider: $this->createStubConfig(type: KeyProvider::class)
@@ -286,8 +524,9 @@ final class FileCodecTest extends UnitTestCase
     private function encodeToTemp(
         FileCodec $codec,
         string $content,
-        Compression $compression,
-        Encryption $encryption
+        AutoCompression|Compression $compression,
+        Encryption $encryption,
+        string $associatedData = ''
     ): array {
         $source = fopen(filename: 'php://temp', mode: 'r+b');
         $target = fopen(filename: 'php://temp', mode: 'r+b');
@@ -298,7 +537,13 @@ final class FileCodecTest extends UnitTestCase
         fwrite(stream: $source, data: $content);
         rewind(stream: $source);
 
-        $encoded = $codec->encode(source: $source, target: $target, compression: $compression, encryption: $encryption);
+        $encoded = $codec->encode(
+            source: $source,
+            target: $target,
+            compression: $compression,
+            encryption: $encryption,
+            associatedData: $associatedData
+        );
 
         fseek(stream: $target, offset: 0);
 

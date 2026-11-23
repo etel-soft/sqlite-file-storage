@@ -24,4 +24,10 @@ final readonly class PassthroughCodec implements Compressor, Decompressor
     {
         return '';
     }
+
+    #[Override]
+    public function restarted(): self
+    {
+        return $this;
+    }
 }

@@ -30,4 +30,10 @@ final readonly class PassthroughCrypto implements Decryptor, Encryptor
     {
         return '';
     }
+
+    #[Override]
+    public function restarted(): self
+    {
+        return $this;
+    }
 }

@@ -13,7 +13,6 @@ use PHPUnit\Framework\Attributes\RequiresPhpExtension;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\Attributes\TestDox;
 
-use function random_bytes;
 use function str_repeat;
 use function substr;
 
@@ -49,7 +48,8 @@ final class BrotliDecompressorTest extends UnitTestCase
 
         // A valid brotli prefix followed by garbage destroys the stream structure;
         // brotli tolerates truncation and single-byte flips, but not a wrecked body.
-        $corrupted = substr(string: $compressed, offset: 0, length: 8) . random_bytes(length: 1024);
+        // The garbage is fixed: random bytes pass as a stream cut short once in a few hundred runs.
+        $corrupted = substr(string: $compressed, offset: 0, length: 8) . str_repeat(string: "\xFF", times: 1024);
 
         $decompressor = new BrotliDecompressor();
 
@@ -57,5 +57,22 @@ final class BrotliDecompressorTest extends UnitTestCase
 
         $decompressor->add(chunk: $corrupted);
         $decompressor->finish();
+    }
+
+    #[Test]
+    #[TestDox('Restarted, it decodes from the start of a stream again')]
+    #[RequiresPhpExtension('brotli')]
+    public function testRestartedDecodesFromTheStart(): void
+    {
+        $original = str_repeat(string: 'brotli decompressor payload. ', times: 4000);
+        $compressor = new BrotliCompressor();
+        $compressed = $compressor->add(chunk: $original) . $compressor->finish();
+        $decompressor = new BrotliDecompressor();
+        $decompressor->add(chunk: substr(string: $compressed, offset: 0, length: 10));
+
+        $restarted = $decompressor->restarted();
+
+        $this->assertNotSame($decompressor, $restarted);
+        $this->assertSame($original, $restarted->add(chunk: $compressed) . $restarted->finish());
     }
 }
