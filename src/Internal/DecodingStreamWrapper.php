@@ -257,8 +257,10 @@ final class DecodingStreamWrapper
         }
 
         while ($this->position < $target) {
+            // content that ends before the target fails in the read, as shorter than its recorded size: nothing
+            // read is no way out of here, but it must not be a way to loop forever either
             if ($this->stream_read(count: min(self::READ_CHUNK_SIZE, $target - $this->position)) === '') {
-                return false;
+                return false; // @codeCoverageIgnore
             }
         }
 
