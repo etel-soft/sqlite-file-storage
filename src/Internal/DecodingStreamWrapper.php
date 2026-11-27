@@ -55,6 +55,9 @@ use function substr;
  * a compressed stream without its end) or goes on past it fails, instead of being read as if it were whole. Encrypted
  * content is held by its final tag already; this is what holds content that is not.
  *
+ * Encrypted content is never stored as nothing: even an empty plaintext is one final chunk, a tag with no bytes under
+ * it. A record of encrypted content with no stored bytes has no tag to check, so it fails instead of reading as empty.
+ *
  * @internal
  */
 final class DecodingStreamWrapper
@@ -367,6 +370,13 @@ final class DecodingStreamWrapper
         $remaining = $this->storedSize - $this->bytesConsumed;
 
         if ($remaining <= 0) {
+            if ($this->cipherChunkSize > 0) {
+                // the only way here for encrypted content: nothing is stored, so no chunk was ever authenticated
+                throw ContentIntegrityException::detected(
+                    reason: 'encrypted content is empty: the final chunk that authenticates it is missing'
+                );
+            }
+
             $this->sourceDrained = true;
 
             return '';

@@ -9,6 +9,8 @@ use Etel\SqliteFileStorage\Internal\Codec\PassthroughCodec;
 use Etel\SqliteFileStorage\Internal\Codec\ZlibCompressor;
 use Etel\SqliteFileStorage\Internal\Codec\ZlibDecompressor;
 use Etel\SqliteFileStorage\Internal\Crypto\PassthroughCrypto;
+use Etel\SqliteFileStorage\Internal\Crypto\SecretStreamDecryptor;
+use Etel\SqliteFileStorage\Internal\Crypto\SecretStreamEncryptor;
 use Etel\SqliteFileStorage\Internal\DecodingStreamWrapper;
 use Etel\SqliteFileStorage\Tests\UnitTestCase;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -18,6 +20,8 @@ use PHPUnit\Framework\Attributes\TestWith;
 
 use const SEEK_CUR;
 use const SEEK_END;
+use const SODIUM_CRYPTO_SECRETSTREAM_XCHACHA20POLY1305_ABYTES;
+use const SODIUM_CRYPTO_SECRETSTREAM_XCHACHA20POLY1305_KEYBYTES;
 use const ZLIB_ENCODING_DEFLATE;
 
 use function feof;
@@ -452,6 +456,80 @@ final class DecodingStreamWrapperTest extends UnitTestCase
 
         $this->expectException(ContentIntegrityException::class);
         $this->expectExceptionMessageIsOrContains('longer than its recorded size');
+
+        stream_get_contents(stream: $decoded);
+    }
+
+    #[Test]
+    #[TestDox('Encrypted content reads back, an empty one too: it is one final chunk')]
+    #[TestWith([''])]
+    #[TestWith(['classified'])]
+    public function testEncryptedContentReadsBack(string $content): void
+    {
+        $key = str_repeat(string: 'K', times: SODIUM_CRYPTO_SECRETSTREAM_XCHACHA20POLY1305_KEYBYTES);
+        $encryptor = new SecretStreamEncryptor(key: $key);
+        $stored = $encryptor->encryptChunk(plaintext: $content, final: true);
+
+        $decoded = DecodingStreamWrapper::open(
+            source: self::sourceOf(data: $stored),
+            decryptor: new SecretStreamDecryptor(key: $key, header: $encryptor->header()),
+            decompressor: new PassthroughCodec(),
+            cipherChunkSize: 1024 + SODIUM_CRYPTO_SECRETSTREAM_XCHACHA20POLY1305_ABYTES,
+            storedSize: strlen(string: $stored),
+            plainSize: strlen(string: $content)
+        );
+
+        $this->assertSame(
+            SODIUM_CRYPTO_SECRETSTREAM_XCHACHA20POLY1305_ABYTES + strlen(string: $content),
+            strlen(string: $stored)
+        );
+        $this->assertSame($content, stream_get_contents(stream: $decoded));
+    }
+
+    #[Test]
+    #[TestDox('Encrypted content with no stored bytes fails authentication instead of reading as empty')]
+    public function testEncryptedContentWithNothingStoredFails(): void
+    {
+        $key = str_repeat(string: 'K', times: SODIUM_CRYPTO_SECRETSTREAM_XCHACHA20POLY1305_KEYBYTES);
+        $encryptor = new SecretStreamEncryptor(key: $key);
+        // what the encryptor wrote is still there: only the recorded stored size says there is nothing
+        $stored = $encryptor->encryptChunk(plaintext: 'classified', final: true);
+
+        $decoded = DecodingStreamWrapper::open(
+            source: self::sourceOf(data: $stored),
+            decryptor: new SecretStreamDecryptor(key: $key, header: $encryptor->header()),
+            decompressor: new PassthroughCodec(),
+            cipherChunkSize: 1024 + SODIUM_CRYPTO_SECRETSTREAM_XCHACHA20POLY1305_ABYTES,
+            storedSize: 0,
+            plainSize: 0
+        );
+
+        $this->expectException(ContentIntegrityException::class);
+        $this->expectExceptionMessageIsOrContains('the final chunk that authenticates it is missing');
+
+        stream_get_contents(stream: $decoded);
+    }
+
+    #[Test]
+    #[TestDox('Encrypted content shorter than a final chunk — less than a tag — fails authentication')]
+    #[TestWith([1])]
+    #[TestWith([16])]
+    public function testEncryptedContentShorterThanATagFails(int $storedSize): void
+    {
+        $key = str_repeat(string: 'K', times: SODIUM_CRYPTO_SECRETSTREAM_XCHACHA20POLY1305_KEYBYTES);
+        $encryptor = new SecretStreamEncryptor(key: $key);
+        $stored = $encryptor->encryptChunk(plaintext: '', final: true);
+
+        $decoded = DecodingStreamWrapper::open(
+            source: self::sourceOf(data: $stored),
+            decryptor: new SecretStreamDecryptor(key: $key, header: $encryptor->header()),
+            decompressor: new PassthroughCodec(),
+            cipherChunkSize: 1024 + SODIUM_CRYPTO_SECRETSTREAM_XCHACHA20POLY1305_ABYTES,
+            storedSize: $storedSize,
+            plainSize: 0
+        );
+
+        $this->expectException(ContentIntegrityException::class);
 
         stream_get_contents(stream: $decoded);
     }

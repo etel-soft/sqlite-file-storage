@@ -412,6 +412,34 @@ final class SqliteStorageEdgeCasesTest extends IntegrationTestCase
     }
 
     #[Test]
+    #[TestDox('An encrypted record made empty out-of-band fails authentication instead of reading as empty')]
+    #[TestWith(['bound to its owner'])]
+    #[TestWith([''])]
+    public function testEncryptedContentMadeEmptyIsDetected(string $associatedData): void
+    {
+        $path = $this->databasePath();
+        $options = new StorageOptions(keyProvider: $this->keyProvider());
+        $storage = $this->openStorage(options: $options);
+        $storage->putObject(
+            key: 'secret.bin',
+            content: 'classified',
+            options: new PutOptions(encryption: Encryption::XChaCha20Poly1305, associatedData: $associatedData)
+        );
+        $storage->close();
+
+        $raw = new SQLite3(filename: $path);
+        $raw->exec(query: 'UPDATE contents SET stored_size = 0, size = 0');
+        $raw->close();
+
+        $object = $this->openStorage(options: $options)->getObject(key: 'secret.bin', associatedData: $associatedData);
+
+        $this->expectException(ContentIntegrityException::class);
+        $this->expectExceptionMessageIsOrContains('the final chunk that authenticates it is missing');
+
+        $object->getContents();
+    }
+
+    #[Test]
     #[TestDox('Closing a storage whose content stream is still open fails as a storage error')]
     public function testCloseWithOpenContentStreamFailsAsStorageError(): void
     {
