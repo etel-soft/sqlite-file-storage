@@ -99,6 +99,19 @@ interface Storage
      */
     public function deleteObject(string $key): void;
 
+    /**
+     * Deletes the objects under the given keys in one transaction: all of them, or — when it fails — none. One commit
+     * (so one sync to disk) for the batch, instead of one per key.
+     *
+     * A key with no object is not an error: it is passed over, as is a key given a second time.
+     *
+     * @param list<string> $keys
+     *
+     * @throws StorageReadOnlyException
+     * @return int                      How many objects were deleted
+     */
+    public function deleteObjects(array $keys): int;
+
     public function getStats(): StorageStats;
 
     /**
