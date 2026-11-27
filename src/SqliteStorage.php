@@ -184,6 +184,43 @@ final class SqliteStorage implements Storage
     }
 
     #[Override]
+    public function deleteObjects(array $keys): int
+    {
+        $this->assertWritable(operation: 'deleteObjects');
+
+        if ($keys === []) {
+            return 0;
+        }
+
+        $deleted = 0;
+
+        $this->transactional(operation: function () use ($keys, &$deleted): void {
+            $deleted = 0;
+            /** @var array<int, int> $released Content id => references dropped */
+            $released = [];
+
+            foreach ($keys as $key) {
+                // a key given twice is absent the second time
+                $row = $this->selectObjectRow(key: $key);
+
+                if ($row === null) {
+                    continue;
+                }
+
+                $this->execute(sql: 'DELETE FROM objects WHERE key = :key', params: [':key' => $key]);
+                $released[$row['content_id']] = ($released[$row['content_id']] ?? 0) + 1;
+                ++$deleted;
+            }
+
+            foreach ($released as $contentId => $references) {
+                $this->changeRefcount(contentId: $contentId, delta: -$references);
+            }
+        });
+
+        return $deleted;
+    }
+
+    #[Override]
     public function findByHash(string $hash): ?ObjectInfo
     {
         $row = $this->fetchOne(

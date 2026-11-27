@@ -139,6 +139,21 @@ default; `-1` leaves it unbounded) when it starts the log over, so one large wri
 Opening an existing storage for writing takes no write lock: the schema is read as any other data, and only a new
 database (or one to migrate) is set up under `BEGIN IMMEDIATE`.
 
+## Deleting in batches
+
+`deleteObject()` is a transaction of its own, so a commit — and, under `Durability::Synced`, a sync to disk — per key.
+`deleteObjects()` (since 2.1) takes a list of keys in one transaction:
+
+```php
+$deleted = $storage->deleteObjects(['invoices/2026/0001.pdf', 'invoices/2026/0002.pdf']);
+```
+
+It deletes all of them or, when it fails, none. A key with no object is passed over rather than refused
+(`deleteObject()` throws an `ObjectNotFoundException`); what comes back is how many objects were deleted. Content
+shared with objects that stay is kept, as with `deleteObject()`.
+
+An implementation or a decorator of `Storage` adds the method.
+
 ## Upgrading from 1.x
 
 2.0 changes the API where 1.x let invalid states through; the database format stays — a 1.x database opens as it
